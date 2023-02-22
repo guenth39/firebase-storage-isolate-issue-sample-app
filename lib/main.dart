@@ -6,20 +6,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_isolate/flutter_isolate.dart';
 import 'package:path_provider/path_provider.dart';
-
-@pragma('vm:entry-point')
-Future<void> computeFunction(String arg) async {
-  print('running in isolate');
-  return Future.value();
-}
+import 'package:sample/firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Firebase.
+  // It makes no difference if the main app initializes Firebase or not.
   await FirestoreService().init();
 
   runApp(const MyApp());
+}
+
+@pragma('vm:entry-point')
+Future<void> uploadToStorage(String filePath) async {
+  print('running in isolate');
+  // Makes no difference if this is called or not.
+  // WidgetsFlutterBinding.ensureInitialized();
+
+  await FirestoreService().init();
+
+  final z = DateTime.now().millisecondsSinceEpoch;
+  final imageBucket = FirebaseStorage.instanceFor(app: FirestoreService().app);
+  await imageBucket.ref('test-$z.jpg').putFile(File(filePath));
 }
 
 class MyApp extends StatelessWidget {
@@ -67,7 +76,7 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             Text(
               '$_counter',
-              style: Theme.of(context).textTheme.headline4,
+              style: Theme.of(context).textTheme.headlineMedium,
             ),
           ],
         ),
@@ -84,11 +93,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> upload() async {
     setState(() => _counter++);
 
-    // Trigger computation in Isolate
-    await flutterCompute(computeFunction, "foo");
-
     // Load a file to upload
-    final z = DateTime.now().millisecondsSinceEpoch;
     final tmp = await getTemporaryDirectory();
     final data = await rootBundle.load('assets/dell.jpg');
     final buffer = data.buffer;
@@ -98,9 +103,10 @@ class _MyHomePageState extends State<MyHomePage> {
     // Upload the file.
     print('[UPLOAD STARTED]');
 
-    final imageBucket =
-        FirebaseStorage.instanceFor(app: FirestoreService().app);
-    await imageBucket.ref('test-$z.jpg').putFile(file);
+    await flutterCompute<void, String>(
+      uploadToStorage,
+      file.path,
+    );
 
     // When an isolate has been triggered prior to upload, you'll
     // never get to this point. If you comment out the isolate, you'll need
@@ -111,23 +117,18 @@ class _MyHomePageState extends State<MyHomePage> {
 
 /// A small service to initialize a Firebase app instance.
 class FirestoreService {
-  FirestoreService._();
-  static final FirestoreService _instance = FirestoreService._();
   factory FirestoreService() => _instance;
-  late final FirebaseApp app;
 
-  final options = const FirebaseOptions(
-    appId: '[YOUR APP ID]',
-    apiKey: '[YOUR API KEY]',
-    projectId: '[YOUR PROJECT ID]',
-    messagingSenderId: '[YOUR SENDER ID]',
-    storageBucket: '[YOUR STORAGE BUCKET]',
-  );
+  FirestoreService._();
+
+  static final FirestoreService _instance = FirestoreService._();
+
+  late final FirebaseApp app;
 
   Future<void> init() async {
     app = await Firebase.initializeApp(
       name: 'testing-isolate-issue',
-      options: options,
+      options: DefaultFirebaseOptions.currentPlatform,
     );
   }
 }
